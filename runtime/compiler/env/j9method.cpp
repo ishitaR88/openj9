@@ -8010,7 +8010,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                "type",             "Ljava/lang/invoke/MethodType;"),
                "methodDescriptor", "Ljava/lang/String;");
             methodDescriptorLength = fej9->getStringUTF8Length(methodDescriptorRef);
-            methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #if defined(__open_xl__)
+               methodDescriptor = (char*)__builtin_alloca(methodDescriptorLength+1);
+            #else
+               methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #endif
             fej9->getStringUTF8(methodDescriptorRef, methodDescriptor, methodDescriptorLength+1);
             }
 
@@ -8211,7 +8215,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                "type",             "Ljava/lang/invoke/MethodType;"),
                "methodDescriptor", "Ljava/lang/String;");
             methodDescriptorLength = fej9->getStringUTF8Length(methodDescriptorRef);
-            methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #if defined(__open_xl__)
+               methodDescriptor = (char*)__builtin_alloca(methodDescriptorLength+1);
+            #else
+               methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #endif
             fej9->getStringUTF8(methodDescriptorRef, methodDescriptor, methodDescriptorLength+1);
             }
 
@@ -8320,7 +8328,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                "type",             "Ljava/lang/invoke/MethodType;"),
                "methodDescriptor", "Ljava/lang/String;");
             methodDescriptorLength = fej9->getStringUTF8Length(methodDescriptorRef);
-            nextHandleSignature = (char*)alloca(methodDescriptorLength+1);
+            #if defined(__open_xl__)
+               nextHandleSignature = (char*)__builtin_alloca(methodDescriptorLength+1);
+            #else
+               nextHandleSignature = (char*)alloca(methodDescriptorLength+1);
+            #endif
             fej9->getStringUTF8(methodDescriptorRef, nextHandleSignature, methodDescriptorLength+1);
             }
 
@@ -8801,7 +8813,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
 
          // Construct the signature string for the array class
          //
-         char *arrayClassSignature = (char*)alloca(arity + leafClassNameLength + 3); // 3 = 'L' + ';' + null terminator
+         #if defined(__open_xl__)
+            char *arrayClassSignature = (char*)__builtin_alloca(arity + leafClassNameLength + 3); // 3 = 'L' + ';' + null terminator
+         #else
+            char *arrayClassSignature = (char*)alloca(arity + leafClassNameLength + 3); // 3 = 'L' + ';' + null terminator
+         #endif
          memset(arrayClassSignature, '[', arity);
          if (isPrimitiveClass)
             {
@@ -9145,7 +9161,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
 
             uintptr_t methodDescriptorRef = fej9->getReferenceField(finallyType, "methodDescriptor", "Ljava/lang/String;");
             int methodDescriptorLength = fej9->getStringUTF8Length(methodDescriptorRef);
-            methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #if defined(__open_xl__)
+               methodDescriptor = (char*)__builtin_alloca(methodDescriptorLength+1);
+            #else
+               methodDescriptor = (char*)alloca(methodDescriptorLength+1);
+            #endif
             fej9->getStringUTF8(methodDescriptorRef, methodDescriptor, methodDescriptorLength+1);
             }
 
@@ -9331,7 +9351,11 @@ TR_J9ByteCodeIlGenerator::runFEMacro(TR::SymbolReference *symRef)
                "type",             "Ljava/lang/invoke/MethodType;"),
                "methodDescriptor", "Ljava/lang/String;");
             intptr_t methodDescriptorLength = fej9->getStringUTF8Length(methodDescriptorRef);
-            nextSignature = (char*)alloca(methodDescriptorLength+1);
+            #if defined(__open_xl__)
+               nextSignature = (char*)__builtin_alloca(methodDescriptorLength+1);
+            #else
+               nextSignature = (char*)alloca(methodDescriptorLength+1);
+            #endif
             fej9->getStringUTF8(methodDescriptorRef, nextSignature, methodDescriptorLength+1);
             }
 
