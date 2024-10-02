@@ -1483,7 +1483,6 @@ protected Object getClassLoadingLock(final String className) {
 	return lock;
 }
 
-
 /**
  * Forces a class to be linked (initialized).  If the class has
  * already been linked this operation has no effect.
@@ -1559,7 +1558,6 @@ final boolean isAncestorOf (ClassLoader child) {
 	}
 	return false;
 }
-
 
 /**
  * A class loader 'callerClassLoader' can access class loader 'requested' without permission check
@@ -2251,7 +2249,6 @@ private boolean getClassAssertionStatusHelper(String cname) {
 	return getDefaultAssertionStatus();
 }
 
-
 /**
  * Answers the assertion status of the named package
  *
@@ -2587,4 +2584,10 @@ static void checkClassLoaderPermission(ClassLoader classLoader, Class<?> caller)
 	}
 }
 /*[ENDIF] JAVA_SPEC_VERSION >= 19 */
+
+/*[IF JAVA_SPEC_VERSION >= 24]*/
+static NativeLibraries nativeLibrariesFor(ClassLoader loader) {
+	return (loader == null) ? BootLoader.getNativeLibraries() : loader.nativelibs;
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 24 */
 }

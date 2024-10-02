@@ -46,6 +46,7 @@
 #include "j2sever.h"
 #include "vrfytbl.h"
 #include "bytecodewalk.h"
+#include "../shared_common/include/SCQueryFunctions.h"
 
 /* Static J9ITable used as a non-NULL iTable cache value by classes that don't implement any interfaces */
 const J9ITable invalidITable = { (J9Class *) (UDATA) 0xDEADBEEF, 0, (J9ITable *) NULL };
@@ -517,7 +518,7 @@ iterateToNextArgument(U_32 sigIndex, U_32 sigLength, U_8* sigData)
 	if (sigIndex >= sigLength) return sigIndex;
 
 	/* check for object */
-	if (IS_REF_OR_VAL_SIGNATURE(sigData[sigIndex])) {
+	if (IS_CLASS_SIGNATURE(sigData[sigIndex])) {
 		while ((sigIndex < sigLength) && (';' != sigData[sigIndex])) {
 			sigIndex += 1;
 		}
@@ -2641,6 +2642,13 @@ recreateRAMClasses(J9VMThread * currentThread, J9HashTable * classHashTable, J9H
 		/* Delete original class from defining loader's class table */
 		if (!fastHCR) {
 			vmFuncs->hashClassTableDelete(classLoader, J9UTF8_DATA(className), J9UTF8_LENGTH(className));
+			if ((NULL != vm->sharedClassConfig) && (NULL != vm->sharedClassConfig->romToRamHashTable)) {
+				RomToRamEntry entry;
+				entry.ramClass = originalRAMClass;
+				omrthread_rwmutex_enter_write(vm->sharedClassConfig->romToRamHashTableMutex);
+				hashTableRemove(vm->sharedClassConfig->romToRamHashTable, &entry);
+				omrthread_rwmutex_exit_write(vm->sharedClassConfig->romToRamHashTableMutex);
+			}
 		}
 
 		/* Create new RAM class */

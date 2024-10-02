@@ -817,8 +817,8 @@ TR_J9VMBase::TR_J9VMBase(
 #if defined(J9VM_OPT_CRIU_SUPPORT)
       || (vmThread
           && jitConfig->javaVM->sharedClassConfig
-          && jitConfig->javaVM->internalVMFunctions->isDebugOnRestoreEnabled(vmThread)
-          && jitConfig->javaVM->internalVMFunctions->isCheckpointAllowed(vmThread))
+          && jitConfig->javaVM->internalVMFunctions->isDebugOnRestoreEnabled(jitConfig->javaVM)
+          && jitConfig->javaVM->internalVMFunctions->isCheckpointAllowed(jitConfig->javaVM))
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
       )
       // shared classes and AOT must be enabled, or we should be on the JITServer with remote AOT enabled
@@ -2437,6 +2437,27 @@ bool
 TR_J9VMBase::isHotReferenceFieldRequired()
    {
    return TR::Compiler->om.isHotReferenceFieldRequired();
+   }
+
+bool
+TR_J9VMBase::isIndexableDataAddrPresent()
+   {
+#if defined(J9VM_ENV_DATA64)
+   return FALSE != _jitConfig->javaVM->isIndexableDataAddrPresent;
+#else
+   return false;
+#endif /* defined(J9VM_ENV_DATA64) */
+   }
+
+/**
+ * Query if off-heap large array allocation is enabled
+ *
+ * @return true if off-heap large array allocation is enabled, false otherwise
+ */
+bool
+TR_J9VMBase::isOffHeapAllocationEnabled()
+   {
+   return TR::Compiler->om.isOffHeapAllocationEnabled();
    }
 
 bool
@@ -5120,6 +5141,41 @@ TR_J9VMBase::getMemberNameFieldKnotIndexFromMethodHandleKnotIndex(TR::Compilatio
    uintptr_t mhObject = knot->getPointer(mhIndex);
    uintptr_t mnObject = getReferenceField(mhObject, fieldName, "Ljava/lang/invoke/MemberName;");
    return knot->getOrCreateIndex(mnObject);
+   }
+
+TR::KnownObjectTable::Index
+TR_J9VMBase::getLayoutVarHandle(TR::Compilation *comp, TR::KnownObjectTable::Index layoutIndex)
+   {
+   TR::VMAccessCriticalSection getLayoutVarHandle(this);
+   TR::KnownObjectTable::Index result = TR::KnownObjectTable::UNKNOWN;
+   TR::KnownObjectTable *knot = comp->getKnownObjectTable();
+   if (!knot) return result;
+
+   const char * const layoutClassName =
+      "jdk/internal/foreign/layout/ValueLayouts$AbstractValueLayout";
+   const int layoutClassNameLen = (int)strlen(layoutClassName);
+   TR_OpaqueClassBlock *layoutClass =
+      getSystemClassFromClassName(layoutClassName, layoutClassNameLen);
+
+   TR_OpaqueClassBlock *layoutObjClass =
+      getObjectClassFromKnownObjectIndex(comp, layoutIndex);
+
+   if (layoutClass == NULL ||
+       layoutObjClass == NULL ||
+       isInstanceOf(layoutObjClass, layoutClass, true, true) != TR_yes)
+      {
+      if (comp->getOption(TR_TraceOptDetails))
+         traceMsg(comp, "getLayoutVarHandle: failed ValueLayouts$AbstractValueLayout type check.\n");
+      return result;
+      }
+
+   uintptr_t layoutObj = knot->getPointer(layoutIndex);
+   uintptr_t vhObject = getReferenceField(layoutObj,
+                                 "handle",
+                                 "Ljava/lang/invoke/VarHandle;");
+   if (!vhObject) return result;
+   result = knot->getOrCreateIndex(vhObject);
+   return result;
    }
 
 TR::KnownObjectTable::Index
@@ -9622,7 +9678,8 @@ bool
 TR_J9VMBase::inSnapshotMode()
    {
 #if defined(J9VM_OPT_CRIU_SUPPORT)
-   return getJ9JITConfig()->javaVM->internalVMFunctions->isCheckpointAllowed(vmThread());
+   J9JavaVM *javaVM = getJ9JITConfig()->javaVM;
+   return javaVM->internalVMFunctions->isCheckpointAllowed(javaVM);
 #else /* defined(J9VM_OPT_CRIU_SUPPORT) */
    return false;
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
@@ -9642,7 +9699,8 @@ bool
 TR_J9VMBase::isSnapshotModeEnabled()
    {
 #if defined(J9VM_OPT_CRIU_SUPPORT)
-   return getJ9JITConfig()->javaVM->internalVMFunctions->isCRaCorCRIUSupportEnabled(vmThread());
+   J9JavaVM *javaVM = getJ9JITConfig()->javaVM;
+   return javaVM->internalVMFunctions->isCRaCorCRIUSupportEnabled(javaVM);
 #else /* defined(J9VM_OPT_CRIU_SUPPORT) */
    return false;
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */

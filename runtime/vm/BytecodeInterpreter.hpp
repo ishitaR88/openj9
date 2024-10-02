@@ -1232,7 +1232,10 @@ obj:
 						} else {
 							rc = THROW_ARRAY_STORE;
 						}
-					} else if (J9_IS_J9CLASS_FLATTENED(srcClazz) || J9_IS_J9CLASS_FLATTENED(destClazz) || J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(destComponentClass)) {
+					} else if (J9_IS_J9CLASS_FLATTENED(srcClazz)
+						|| J9_IS_J9CLASS_FLATTENED(destClazz)
+						|| J9_IS_J9CLASS_ALLOW_DEFAULT_VALUE(destComponentClass)
+					) {
 						/* VM_ArrayCopyHelpers::referenceArrayCopy cannot handle flattened arrays or null elements being copied into arrays of primitive value types, so for those cases use copyFlattenableArray instead */
 						updateVMStruct(REGISTER_ARGS);
 						I_32 value = VM_ValueTypeHelpers::copyFlattenableArray(_currentThread, _objectAccessBarrier, _objectAllocate, srcObject, destObject, srcStart, destStart, elementCount);
@@ -2925,8 +2928,7 @@ done:
 	inlClassIsIdentity(REGISTER_ARGS_LIST)
 	{
 		J9Class *receiverClazz = J9VM_J9CLASS_FROM_HEAPCLASS(_currentThread, *(j9object_t*)_sp);
-		bool isValue = J9ROMCLASS_IS_VALUE(receiverClazz->romClass);
-		returnSingleFromINL(REGISTER_ARGS, (isValue ? 0 : 1), 1);
+		returnSingleFromINL(REGISTER_ARGS, J9_IS_J9CLASS_IDENTITY(receiverClazz), 1);
 		return EXECUTE_BYTECODE;
 	}
 
@@ -6888,22 +6890,12 @@ done:
 				if (false == VM_VMHelpers::objectArrayStoreAllowed(_currentThread, arrayref, value)) {
 					rc = THROW_ARRAY_STORE;
 				} else {
-#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
-					J9ArrayClass *arrayrefClass = (J9ArrayClass *) J9OBJECT_CLAZZ(_currentThread, arrayref);
-					if (J9_IS_J9CLASS_PRIMITIVE_VALUETYPE(arrayrefClass->componentType) && (NULL == value)) {
-						rc = THROW_NPE;
-						goto done;
-					}
-#endif /* if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 					VM_ValueTypeHelpers::storeFlattenableArrayElement(_currentThread, _objectAccessBarrier, arrayref, index, value);
 					_pc += 1;
 					_sp += 3;
 				}
 			}
 		}
-#if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES)
-done:
-#endif /* if defined(J9VM_OPT_VALHALLA_FLATTENABLE_VALUE_TYPES) */
 		return rc;
 	}
 
@@ -8591,9 +8583,9 @@ retry:
 			}
 		}
 
-		/* In the future Valhalla checkcast needs to throw exception on
-		 * null restricted checkedType if obj is null,
-		 * see issue https://github.com/eclipse-openj9/openj9/issues/19764
+		/* In the future, Valhalla checkcast must throw an exception on
+		 * null-restricted checkedType if object is null.
+		 * See issue https://github.com/eclipse-openj9/openj9/issues/19764.
 		 */
 
 		_pc += 3;

@@ -65,6 +65,10 @@ import java.lang.reflect.Field;
 import jdk.internal.util.SystemProps;
 /*[ENDIF] JAVA_SPEC_VERSION >= 20 */
 
+/*[IF JAVA_SPEC_VERSION >= 24]*/
+import java.net.URL;
+/*[ENDIF] JAVA_SPEC_VERSION >= 24 */
+
 /**
  * Class System provides a standard place for programs
  * to find system related information. All System API
@@ -569,6 +573,13 @@ static void initGPUAssist() {
 }
 /*[ENDIF] JAVA_SPEC_VERSION >= 9 */
 
+/*[IF JAVA_SPEC_VERSION >= 24]*/
+static URL codeSource(Class<?> callerClass) {
+	CodeSource codeSource = callerClass.getProtectionDomainInternal().getCodeSource();
+	return (codeSource == null) ? null : codeSource.getLocation();
+}
+/*[ENDIF] JAVA_SPEC_VERSION >= 24 */
+
 /**
  * Sets the value of the static slot "in" in the receiver
  * to the passed in argument.
@@ -655,7 +666,6 @@ private static void arraycopy(Object[] A1, int offset1, Object[] A2, int offset2
 		}
 	} else throw new ArrayIndexOutOfBoundsException();
 }
-
 
 /**
  * Answers the current time expressed as milliseconds since
@@ -1601,7 +1611,7 @@ private static void simpleMultiLeafArrayCopy(Object src, int srcPos,
 			 if (isFwd)
 				iterLength = numOfElemsPerLeaf - destLeafPos;
 			 else
-		  		iterLength = destLeafPos + 1;
+				iterLength = destLeafPos + 1;
 		 }
 
 		 if (length - count < iterLength)
@@ -1610,7 +1620,7 @@ private static void simpleMultiLeafArrayCopy(Object src, int srcPos,
 		 if (isFwd)
 			offset = 0;
 		 else
-		  	offset = iterLength - 1;
+			offset = iterLength - 1;
 
 		 System.arraycopy(src, newSrcPos - offset, dest, newDestPos - offset, iterLength);
 
@@ -1683,7 +1693,7 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 		if (isFwd)
 			iterLength1 = numOfElemsPerLeaf - firstPos;
 		else
-		  	iterLength1 = firstPos + 1;
+			iterLength1 = firstPos + 1;
 
 		if (length - count < iterLength1)
 			iterLength1 = length - count;
@@ -1732,7 +1742,6 @@ private static void multiLeafArrayCopy(Object src, int srcPos, Object dest,
 		count += iterLength1 + iterLength2;
 	}
 }
-
 
 /**
  * Return platform specific line separator character(s).

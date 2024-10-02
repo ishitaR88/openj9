@@ -54,6 +54,10 @@
 #include <signal.h>
 #endif
 
+#if defined(J9ZOS390)
+#include "atoe.h"
+#endif
+
 #include "omrcfg.h"
 #include "jvminitcommon.h"
 #include "j9user.h"
@@ -326,17 +330,11 @@ J9_DECLARE_CONSTANT_UTF8(j9_dispatch, "dispatch");
 /* The appropriate bytecodeLoop is selected based on interpreter mode */
 #if defined(OMR_GC_FULL_POINTERS)
 UDATA bytecodeLoopFull(J9VMThread *currentThread);
-#if defined(J9VM_OPT_CRIU_SUPPORT)
-UDATA criuBytecodeLoopFull(J9VMThread *currentThread);
-#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 UDATA debugBytecodeLoopFull(J9VMThread *currentThread);
 #endif /* defined(OMR_GC_FULL_POINTERS) */
 
 #if defined(OMR_GC_COMPRESSED_POINTERS)
 UDATA bytecodeLoopCompressed(J9VMThread *currentThread);
-#if defined(J9VM_OPT_CRIU_SUPPORT)
-UDATA criuBytecodeLoopCompressed(J9VMThread *currentThread);
-#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 UDATA debugBytecodeLoopCompressed(J9VMThread *currentThread);
 #endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
 
@@ -661,6 +659,12 @@ freeJavaVM(J9JavaVM * vm)
 		}
 		pool_kill(vm->cifArgumentTypesCache);
 		vm->cifArgumentTypesCache = NULL;
+	}
+
+	/* Delete the layout string hashtable if exists. */
+	if (NULL != vm->layoutStrFFITypeTable) {
+		releaseLayoutStrFFITypeTable(vm->layoutStrFFITypeTable);
+		vm->layoutStrFFITypeTable = NULL;
 	}
 
 	/* Empty the thunk heap list if exists. */
@@ -2979,6 +2983,17 @@ VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved)
 				goto _error;
 			}
 #endif /* defined(J9VM_INTERP_ATOMIC_FREE_JNI_USES_FLUSH) */
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+			if (isDebugOnRestoreEnabled(vm)) {
+				Trc_VM_VMInitStages_isDebugOnRestoreEnabled();
+				/* enable jvmtiCapabilities.can_get_source_debug_extension */
+				vm->requiredDebugAttributes |= J9VM_DEBUG_ATTRIBUTE_SOURCE_DEBUG_EXTENSION;
+				/* enable jvmtiCapabilities.can_access_local_variables */
+				vm->requiredDebugAttributes |= J9VM_DEBUG_ATTRIBUTE_CAN_ACCESS_LOCALS;
+				/* enable jvmtiCapabilities.can_maintain_original_method_order */
+				vm->requiredDebugAttributes |= J9VM_DEBUG_ATTRIBUTE_MAINTAIN_ORIGINAL_METHOD_ORDER;
+			}
+#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 			TRIGGER_J9HOOK_VM_ABOUT_TO_BOOTSTRAP(vm->hookInterface, vm->mainThread);
 			/* At this point, the decision about which interpreter to use has been made */
 
@@ -2992,21 +3007,7 @@ VMInitStages(J9JavaVM *vm, IDATA stage, void* reserved)
 					vm->bytecodeLoop = debugBytecodeLoopFull;
 #endif /* defined(OMR_GC_FULL_POINTERS) */
 				}
-			} else
-#if defined(J9VM_OPT_CRIU_SUPPORT)
-			if (J9_ARE_ALL_BITS_SET(vm->checkpointState.flags, J9VM_CRIU_IS_CHECKPOINT_ALLOWED)) {
-				if (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm)) {
-#if defined(OMR_GC_COMPRESSED_POINTERS)
-					vm->bytecodeLoop = criuBytecodeLoopCompressed;
-#endif /* defined(OMR_GC_COMPRESSED_POINTERS) */
-				} else {
-#if defined(OMR_GC_FULL_POINTERS)
-					vm->bytecodeLoop = criuBytecodeLoopFull;
-#endif /* defined(OMR_GC_FULL_POINTERS) */
-				}
-			} else
-#endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
-			{
+			} else {
 				if (J9JAVAVM_COMPRESS_OBJECT_REFERENCES(vm)) {
 #if defined(OMR_GC_COMPRESSED_POINTERS)
 					vm->bytecodeLoop = bytecodeLoopCompressed;

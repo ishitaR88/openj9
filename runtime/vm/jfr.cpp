@@ -19,6 +19,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR Apache-2.0 OR GPL-2.0-only WITH Classpath-exception-2.0 OR GPL-2.0-only WITH OpenJDK-assembly-exception-1.0
  *******************************************************************************/
+#include "JFRConstantPoolTypes.hpp"
 #include "j9protos.h"
 #include "omrlinkedlist.h"
 #include "ut_j9vm.h"
@@ -36,7 +37,7 @@ extern "C" {
 // TODO: allow configureable values
 #define J9JFR_THREAD_BUFFER_SIZE (1024*1024)
 #define J9JFR_GLOBAL_BUFFER_SIZE (10 * J9JFR_THREAD_BUFFER_SIZE)
-#define J9JFR_SAMPLING_RATE 1000
+#define J9JFR_SAMPLING_RATE 10
 
 static UDATA jfrEventSize(J9JFREvent *jfrEvent);
 static void tearDownJFR(J9JavaVM *vm);
@@ -53,8 +54,7 @@ static void jfrThreadEnd(J9HookInterface **hook, UDATA eventNum, void *eventData
 static void jfrVMInitialized(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData);
 static void initializeEventFields(J9VMThread *currentThread, J9JFREvent *jfrEvent, UDATA eventType);
 static int J9THREAD_PROC jfrSamplingThreadProc(void *entryArg);
-static void initializeJFRConstantEvents(J9JavaVM *vm);
-static void freeJFRConstantEvents(J9JavaVM *vm);
+static void jfrExecutionSampleCallback(J9VMThread *currentThread, IDATA handlerKey, void *userData);
 
 /**
  * Calculate the size in bytes of a JFR event.
@@ -78,7 +78,7 @@ jfrEventSize(J9JFREvent *jfrEvent)
 		size = sizeof(J9JFREvent);
 		break;
 	case J9JFR_EVENT_TYPE_THREAD_SLEEP:
-		size = sizeof(J9JFRThreadSleep) + (((J9JFRThreadSleep*)jfrEvent)->stackTraceSize * sizeof(UDATA));
+		size = sizeof(J9JFRThreadSlept) + (((J9JFRThreadSlept*)jfrEvent)->stackTraceSize * sizeof(UDATA));
 		break;
 	default:
 		Assert_VM_unreachable();
@@ -129,16 +129,6 @@ writeOutGlobalBuffer(J9VMThread *currentThread, bool finalWrite)
 {
 	J9JavaVM *vm = currentThread->javaVM;
 
-	if (FALSE == vm->jfrState.isConstantEventsInitialized) {
-		omrthread_monitor_enter(vm->jfrState.isConstantEventsInitializedMutex);
-		if (FALSE == vm->jfrState.isConstantEventsInitialized) {
-			initializeJFRConstantEvents(vm);
-			/* Ensure that initialization is complete when the initialized variable is set to true */
-			VM_AtomicSupport::writeBarrier();
-			vm->jfrState.isConstantEventsInitialized = TRUE;
-		}
-		omrthread_monitor_exit(vm->jfrState.isConstantEventsInitializedMutex);
-	}
 #if defined(DEBUG)
 	PORT_ACCESS_FROM_VMC(currentThread);
 	j9tty_printf(PORTLIB, "\n!!! writing global buffer %p of size %p\n", currentThread, vm->jfrBuffer.bufferSize - vm->jfrBuffer.bufferRemaining);
@@ -496,20 +486,26 @@ jfrThreadEnd(J9HookInterface **hook, UDATA eventNum, void *eventData, void *user
  * @param userData[in] the registered user data
  */
 static void
-jfrVMSleep(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData)
+jfrVMSlept(J9HookInterface **hook, UDATA eventNum, void *eventData, void *userData)
 {
-	J9VMSleepEvent *event = (J9VMSleepEvent *)eventData;
+	J9VMSleptEvent *event = (J9VMSleptEvent *)eventData;
 	J9VMThread *currentThread = event->currentThread;
+	PORT_ACCESS_FROM_VMC(currentThread);
 
 #if defined(DEBUG)
-	PORT_ACCESS_FROM_VMC(currentThread);
 	j9tty_printf(PORTLIB, "\n!!! thread sleep %p\n", currentThread);
 #endif /* defined(DEBUG) */
 
-	J9JFRThreadSleep *jfrEvent = (J9JFRThreadSleep*)reserveBufferWithStackTrace(currentThread, currentThread, J9JFR_EVENT_TYPE_THREAD_SLEEP, sizeof(*jfrEvent));
+	J9JFRThreadSlept *jfrEvent = (J9JFRThreadSlept*)reserveBufferWithStackTrace(currentThread, currentThread, J9JFR_EVENT_TYPE_THREAD_SLEEP, sizeof(*jfrEvent));
 	if (NULL != jfrEvent) {
 		// TODO: worry about overflow?
-		jfrEvent->time = (event->millis * 1000) + event->nanos;
+		jfrEvent->time = (event->millis * 1000000) + event->nanos;
+		jfrEvent->duration = 0;
+		UDATA result = 0;
+		I_64 currentNanos = j9time_current_time_nanos(&result);
+		if (0 != result) {
+			jfrEvent->duration = currentNanos - event->startNanos;
+		}
 	}
 }
 
@@ -556,6 +552,12 @@ initializeJFR(J9JavaVM *vm)
 	J9HookInterface **vmHooks = getVMHookInterface(vm);
 	U_8 *buffer = NULL;
 
+	/* Register async handler for execution samples */
+	vm->jfrAsyncKey = J9RegisterAsyncEvent(vm, jfrExecutionSampleCallback, NULL);
+	if (vm->jfrAsyncKey < 0) {
+		goto fail;
+	}
+
 	if ((*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_THREAD_CREATED, jfrThreadCreated, OMR_GET_CALLSITE(), NULL)) {
 		goto fail;
 	}
@@ -574,10 +576,16 @@ initializeJFR(J9JavaVM *vm)
 	if ((*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_THREAD_END, jfrThreadEnd, OMR_GET_CALLSITE(), NULL)) {
 		goto fail;
 	}
-	if ((*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_SLEEP, jfrVMSleep, OMR_GET_CALLSITE(), NULL)) {
+	if ((*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_SLEPT, jfrVMSlept, OMR_GET_CALLSITE(), NULL)) {
 		goto fail;
 	}
 	if ((*vmHooks)->J9HookRegisterWithCallSite(vmHooks, J9HOOK_VM_INITIALIZED, jfrVMInitialized, OMR_GET_CALLSITE(), NULL)) {
+		goto fail;
+	}
+
+	/* Allocate constantEvents */
+	vm->jfrState.constantEvents = j9mem_allocate_memory(sizeof(JFRConstantEvents), J9MEM_CATEGORY_VM);
+	if (NULL == vm->jfrState.constantEvents) {
 		goto fail;
 	}
 
@@ -649,11 +657,11 @@ tearDownJFR(J9JavaVM *vm)
 	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_SHUTTING_DOWN, jfrVMShutdown, NULL);
 	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_THREAD_STARTING, jfrThreadStarting, NULL);
 	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_THREAD_END, jfrThreadEnd, NULL);
-	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_SLEEP, jfrVMSleep, NULL);
+	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_SLEPT, jfrVMSlept, NULL);
 	(*vmHooks)->J9HookUnregister(vmHooks, J9HOOK_VM_INITIALIZED, jfrVMInitialized, NULL);
 
 	/* Free global data */
-	freeJFRConstantEvents(vm);
+	VM_JFRConstantPoolTypes::freeJFRConstantEvents(vm);
 
 	j9mem_free_memory((void*)vm->jfrBuffer.bufferStart);
 	memset(&vm->jfrBuffer, 0, sizeof(vm->jfrBuffer));
@@ -668,37 +676,11 @@ tearDownJFR(J9JavaVM *vm)
 	j9mem_free_memory(vm->jfrState.metaDataBlobFile);
 	vm->jfrState.metaDataBlobFile = NULL;
 	vm->jfrState.metaDataBlobFileSize = 0;
-}
+	if (vm->jfrAsyncKey >= 0) {
+		J9UnregisterAsyncEvent(vm, vm->jfrAsyncKey);
+		vm->jfrAsyncKey = -1;
+	}
 
-/**
- * Initialize constantEvents.
- *
- * @param vm[in] the J9JavaVM
- */
-static void
-initializeJFRConstantEvents(J9JavaVM *vm)
-{
-
-	PORT_ACCESS_FROM_JAVAVM(vm);
-	/* Allocate constantEvents */
-	vm->jfrState.constantEvents = j9mem_allocate_memory(sizeof(JFRConstantEvents), J9MEM_CATEGORY_VM);
-
-	VM_JFRConstantPoolTypes::initializeJVMInformationEvent(vm);
-}
-
-/**
- * Free constantEvents.
- *
- * @param vm[in] the J9JavaVM
- */
-static void
-freeJFRConstantEvents(J9JavaVM *vm)
-{
-	PORT_ACCESS_FROM_JAVAVM(vm);
-
-	VM_JFRConstantPoolTypes::freeJVMInformationEvent(vm);
-
-	j9mem_free_memory(vm->jfrState.constantEvents);
 }
 
 /**
@@ -732,6 +714,12 @@ jfrExecutionSample(J9VMThread *currentThread, J9VMThread *sampleThread)
 	}
 }
 
+static void
+jfrExecutionSampleCallback(J9VMThread *currentThread, IDATA handlerKey, void *userData)
+{
+	jfrExecutionSample(currentThread, currentThread);
+}
+
 static int J9THREAD_PROC
 jfrSamplingThreadProc(void *entryArg)
 {
@@ -743,19 +731,7 @@ jfrSamplingThreadProc(void *entryArg)
 		vm->jfrSamplerState = J9JFR_SAMPLER_STATE_RUNNING;
 		omrthread_monitor_notify_all(vm->jfrSamplerMutex);
 		while (J9JFR_SAMPLER_STATE_STOP != vm->jfrSamplerState) {
-			omrthread_monitor_exit(vm->jfrSamplerMutex);
-			internalEnterVMFromJNI(currentThread);
-			acquireExclusiveVMAccess(currentThread);
-			J9VMThread *walkThread = J9_LINKED_LIST_START_DO(vm->mainThread);
-			while (NULL != walkThread) {
-				if (VM_VMHelpers::threadCanRunJavaCode(walkThread)) {
-					jfrExecutionSample(currentThread, walkThread);
-				}
-				walkThread = J9_LINKED_LIST_NEXT_DO(vm->mainThread, walkThread);
-			}
-			releaseExclusiveVMAccess(currentThread);
-			internalExitVMToJNI(currentThread);
-			omrthread_monitor_enter(vm->jfrSamplerMutex);
+			J9SignalAsyncEvent(vm, NULL, vm->jfrAsyncKey);
 			omrthread_monitor_wait_timed(vm->jfrSamplerMutex, J9JFR_SAMPLING_RATE, 0);
 		}
 		omrthread_monitor_exit(vm->jfrSamplerMutex);

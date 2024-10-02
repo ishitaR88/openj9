@@ -2416,6 +2416,22 @@ TR_J9ServerVM::getMethodHandleTableEntryIndex(TR::Compilation *comp, TR::KnownOb
    return mhIndex;
    }
 
+TR::KnownObjectTable::Index
+TR_J9ServerVM::getLayoutVarHandle(TR::Compilation *comp, TR::KnownObjectTable::Index layoutIndex)
+   {
+   TR::KnownObjectTable *knot = comp->getKnownObjectTable();
+   if (!knot) return TR::KnownObjectTable::UNKNOWN;
+
+   JITServer::ServerStream *stream = _compInfoPT->getMethodBeingCompiled()->_stream;
+   stream->write(JITServer::MessageType::VM_getLayoutVarHandle, layoutIndex);
+   auto recv = stream->read<TR::KnownObjectTable::Index, uintptr_t *>();
+
+   TR::KnownObjectTable::Index vhIndex = std::get<0>(recv);
+   knot->updateKnownObjectTableAtServer(vhIndex, std::get<1>(recv));
+   return vhIndex;
+
+   }
+
 #endif /* defined(J9VM_OPT_OPENJDK_METHODHANDLE) */
 
 TR::KnownObjectTable::Index
@@ -2549,6 +2565,31 @@ TR_J9ServerVM::isPortableRestoreModeEnabled()
    JITServer::ServerStream *stream = _compInfoPT->getMethodBeingCompiled()->_stream;
    auto *vmInfo = _compInfoPT->getClientData()->getOrCacheVMInfo(stream);
    return vmInfo->_isPortableRestoreMode;
+   }
+
+bool
+TR_J9ServerVM::isIndexableDataAddrPresent()
+   {
+#if defined(J9VM_ENV_DATA64)
+   JITServer::ServerStream *stream = _compInfoPT->getMethodBeingCompiled()->_stream;
+   auto *vmInfo = _compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+   return vmInfo->_isIndexableDataAddrPresent;
+#else
+   return false;
+#endif /* defined(J9VM_ENV_DATA64) */
+   }
+
+/**
+ * Query if off-heap large array allocation is enabled
+ *
+ * @return true if off-heap large array allocation is enabled, false otherwise
+ */
+bool
+TR_J9ServerVM::isOffHeapAllocationEnabled()
+   {
+   JITServer::ServerStream *stream = _compInfoPT->getMethodBeingCompiled()->_stream;
+   auto *vmInfo = _compInfoPT->getClientData()->getOrCacheVMInfo(stream);
+   return vmInfo->_isOffHeapAllocationEnabled;
    }
 
 bool

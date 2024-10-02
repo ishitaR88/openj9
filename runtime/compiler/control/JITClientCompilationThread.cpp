@@ -1214,6 +1214,16 @@ handleServerMessage(JITServer::ClientStream *client, TR_J9VM *fe, JITServer::Mes
          client->write(response, mhIndex, mhObj);
          }
          break;
+      case MessageType::VM_getLayoutVarHandle:
+         {
+         auto recv = client->getRecvData<TR::KnownObjectTable::Index>();
+         TR::KnownObjectTable::Index vhIndex = fe->getLayoutVarHandle(comp, std::get<0>(recv));
+         uintptr_t* vhObj = NULL;
+         if (vhIndex != TR::KnownObjectTable::UNKNOWN)
+            vhObj = knot->getPointerLocation(vhIndex);
+         client->write(response, vhIndex, vhObj);
+         }
+         break;
 #endif // J9VM_OPT_OPENJDK_METHODHANDLE
       case MessageType::VM_isStable:
          {
@@ -1771,7 +1781,7 @@ handleServerMessage(JITServer::ClientStream *client, TR_J9VM *fe, JITServer::Mes
                case TR_ResolvedMethodType::VirtualFromCP:
                   {
                   resolvedMethod = static_cast<TR_ResolvedJ9Method *>(owningMethod->getResolvedPossiblyPrivateVirtualMethod(comp, cpIndex, true, &unresolvedInCP));
-                  vTableOffset = resolvedMethod ? resolvedMethod->vTableSlot(cpIndex) : 0;
+                  vTableOffset = resolvedMethod ? resolvedMethod->vTableSlot() : 0;
                   break;
                   }
                case TR_ResolvedMethodType::Static:
@@ -1787,7 +1797,7 @@ handleServerMessage(JITServer::ClientStream *client, TR_J9VM *fe, JITServer::Mes
                case TR_ResolvedMethodType::ImproperInterface:
                   {
                   resolvedMethod = static_cast<TR_ResolvedJ9Method *>(owningMethod->getResolvedImproperInterfaceMethod(comp, cpIndex));
-                  vTableOffset = resolvedMethod ? resolvedMethod->vTableSlot(cpIndex) : 0;
+                  vTableOffset = resolvedMethod ? resolvedMethod->vTableSlot() : 0;
                   break;
                   }
                default:

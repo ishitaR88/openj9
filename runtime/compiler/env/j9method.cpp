@@ -1024,15 +1024,6 @@ TR_ResolvedRelocatableJ9Method::TR_ResolvedRelocatableJ9Method(TR_OpaqueMethodBl
          setRecognizedMethod(TR::unknownMethod);
          }
       }
-
-
-   }
-
-int32_t
-TR_ResolvedRelocatableJ9Method::virtualCallSelector(U_32 cpIndex)
-   {
-   return TR_ResolvedJ9Method::virtualCallSelector(cpIndex);
-   //return -1;
    }
 
 bool
@@ -3687,6 +3678,12 @@ void TR_ResolvedJ9Method::construct()
       {  TR::unknownMethod}
       };
 
+   static X ValueLayoutsAbstractValueLayoutMethods[] =
+      {
+      {x(TR::jdk_internal_foreign_layout_ValueLayouts_AbstractValueLayout_accessHandle,        "accessHandle",    "()Ljava/lang/invoke/VarHandle;")},
+      {TR::unknownMethod}
+      };
+
    static X ILGenMacrosMethods[] =
       {
       {  TR::java_lang_invoke_ILGenMacros_placeholder ,      11, "placeholder",      (int16_t)-1, "*"},
@@ -4373,13 +4370,19 @@ void TR_ResolvedJ9Method::construct()
       { 0 }
       };
 
+   static Y class60[] =
+      {
+      { "jdk/internal/foreign/layout/ValueLayouts$AbstractValueLayout", ValueLayoutsAbstractValueLayoutMethods },
+      { 0 }
+      };
+
    static Y * recognizedClasses[] =
       {
       0, 0, 0, class13, class14, class15, class16, class17, class18, class19,
       class20, class21, class22, class23, class24, class25, 0, class27, class28, class29,
       class30, class31, class32, class33, class34, class35, class36, 0, class38, class39,
       class40, class41, class42, class43, class44, class45, class46, class47, class48, class49,
-      class50, 0, 0, class53, 0, class55
+      class50, 0, 0, class53, 0, class55, 0, 0, 0, 0, class60
       };
 
    const int32_t minRecognizedClassLength = 10;
@@ -4770,6 +4773,10 @@ void TR_ResolvedJ9Method::construct()
                {
                setRecognizedMethodInfo(TR::java_lang_invoke_VarHandleByteArrayAsX_ByteBufferHandle_method);
                }
+            }
+         else if ((classNameLen == 31) && !strncmp(className, "java/lang/foreign/MemorySegment", 31))
+            {
+            setRecognizedMethodInfo(TR::java_lang_foreign_MemorySegment_method);
             }
 #endif
          else if ((classNameLen >= 59 + 3 && classNameLen <= 59 + 7) && !strncmp(className, "java/lang/invoke/ArrayVarHandle$ArrayVarHandleOperations$Op", 59))
@@ -5487,9 +5494,9 @@ TR_ResolvedJ9Method::getExistingJittedBodyInfo()
    }
 
 int32_t
-TR_ResolvedJ9Method::virtualCallSelector(U_32 cpIndex)
+TR_ResolvedJ9Method::virtualCallSelector()
    {
-   return -(int32_t)(vTableSlot(cpIndex) - TR::Compiler->vm.getInterpreterVTableOffset());
+   return -(int32_t)(vTableSlot() - TR::Compiler->vm.getInterpreterVTableOffset());
    }
 
 bool
@@ -6487,10 +6494,8 @@ TR_ResolvedJ9Method::startAddressForJNIMethod(TR::Compilation * comp)
    }
 
 U_32
-TR_ResolvedJ9Method::vTableSlot(U_32 cpIndex)
+TR_ResolvedJ9Method::vTableSlot()
    {
-   TR_ASSERT(cpIndex != -1, "cpIndex shouldn't be -1");
-   //UDATA vTableSlot = ((J9RAMVirtualMethodRef *)literals())[cpIndex].methodIndexAndArgCount >> 8;
    return _vTableSlot;
    }
 
@@ -6655,7 +6660,7 @@ TR_ResolvedJ9Method::getResolvedInterfaceMethod(TR::Compilation * comp, TR_Opaqu
       if (m)
          {
          c = m->classOfMethod();
-         if (c && !fej9->isInterfaceClass(c))
+         if (c)
             {
             TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/interface");
             TR::DebugCounter::incStaticDebugCounter(comp, "resources.resolvedMethods/interface:#bytes", sizeof(TR_ResolvedJ9Method));
@@ -6860,6 +6865,14 @@ TR_ResolvedJ9Method::getResolvedPossiblyPrivateVirtualMethod(TR::Compilation * c
          TR_AOTInliningStats *aotStats = NULL;
          if (comp->getOption(TR_EnableAOTStats))
             aotStats = & (((TR_JitPrivateConfig *)_fe->_jitConfig->privateConfig)->aotStats->virtualMethods);
+
+         if (isInvokePrivateVTableOffset(vTableOffset))
+            {
+            // This method is private and therefore not in the vtable, so pass
+            // zero as the vtable slot when creating the TR_ResolvedMethod.
+            vTableOffset = 0;
+            }
+
          if (createResolvedMethod)
             resolvedMethod = createResolvedMethodFromJ9Method(comp, cpIndex, vTableOffset, ramMethod, unresolvedInCP, aotStats);
          }

@@ -61,6 +61,7 @@
 #endif
 
 #define SET_OPTION_BIT(x)   TR::Options::setBit,   offsetof(OMR::Options,_options[(x)&TR_OWM]), ((x)&~TR_OWM)
+
 //Default code cache total max memory percentage set to 25% of physical RAM for low memory systems
 #define CODECACHE_DEFAULT_MAXRAMPERCENTAGE 25
 // For use with TPROF only, disable JVMPI hooks even if -Xrun is specified.
@@ -183,6 +184,7 @@ int32_t J9::Options::_iProfilerMethodHashTableSize = 32707; // 32707 could be an
 int32_t J9::Options::_IprofilerOffSubtractionFactor = 500;
 int32_t J9::Options::_IprofilerOffDivisionFactor = 16;
 
+int32_t J9::Options::_IprofilerPreCheckpointDropRate = 0;
 
 
 int32_t J9::Options::_maxIprofilingCount = TR_DEFAULT_INITIAL_COUNT; // 3000
@@ -223,6 +225,7 @@ int32_t J9::Options::_waitTimeToExitStartupMode = DEFAULT_WAIT_TIME_TO_EXIT_STAR
 int32_t J9::Options::_waitTimeToGCR = 10000; // ms
 int32_t J9::Options::_waitTimeToStartIProfiler = 1000; // ms
 int32_t J9::Options::_compilationDelayTime = 0; // sec; 0 means disabled
+int32_t J9::Options::_delayBeforeStateChange = 500; // ms
 
 int32_t J9::Options::_invocationThresholdToTriggerLowPriComp = 250;
 
@@ -937,6 +940,8 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_dataCacheQuantumSize, 0, "F%d", NOT_IN_SUBSET},
    {"datatotal=",              "C<nnn>\ttotal data memory limit, in KB",
         TR::Options::setJitConfigNumericValue, offsetof(J9JITConfig, dataCacheTotalKB), 0, "F%d (KB)"},
+   {"delayBeforeStateChange=",                 "M<nnn>\tTime (ms) after restore before allowing the JIT to change states.",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_delayBeforeStateChange, 0, "F%d", NOT_IN_SUBSET},
    {"disableIProfilerClassUnloadThreshold=",      "R<nnn>\tNumber of classes that can be unloaded before we disable the IProfiler",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_disableIProfilerClassUnloadThreshold, 0, "F%d", NOT_IN_SUBSET},
    {"dltPostponeThreshold=",      "M<nnn>\tNumber of dlt attempts inv. count for a method is seen not advancing",
@@ -1055,6 +1060,8 @@ TR::OptionTable OMR::Options::_feOptions[] = {
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_IprofilerOffDivisionFactor, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerOffSubtractionFactor=", "O<nnn>\tCounts Subtraction factor when IProfiler is Off",
         TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_IprofilerOffSubtractionFactor, 0, "F%d", NOT_IN_SUBSET},
+   {"iprofilerPreCheckpointDropRate=", "O<nnn>\tPercent*10 of buffers to drop precheckpoint",
+        TR::Options::setStaticNumeric, (intptr_t)&TR::Options::_IprofilerPreCheckpointDropRate, 0, "F%d", NOT_IN_SUBSET},
    {"iprofilerSamplesBeforeTurningOff=", "O<nnn>\tnumber of interpreter profiling samples "
                                 "needs to be taken after the profiling starts going off to completely turn it off. "
                                 "Specify a very large value to disable this optimization",
@@ -2421,7 +2428,7 @@ bool J9::Options::preProcessJitServer(J9JavaVM *vm, J9JITConfig *jitConfig)
          // Enable JITServer client mode if
          // 1) CRIU support is enabled
          // 2) client mode is not explicitly disabled
-         bool implicitClientMode = ifuncs->isCRaCorCRIUSupportEnabled(currentThread) && !useJitServerExplicitlyDisabled;
+         bool implicitClientMode = ifuncs->isCRaCorCRIUSupportEnabled(vm) && !useJitServerExplicitlyDisabled;
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
 
          if (useJitServerExplicitlySpecified
@@ -3026,6 +3033,16 @@ J9::Options::fePostProcessAOT(void * base)
 bool
 J9::Options::isFSDNeeded(J9JavaVM *javaVM, J9HookInterface **vmHooks)
    {
+#if defined(J9VM_OPT_CRIU_SUPPORT)
+   if (javaVM->internalVMFunctions->isCheckpointAllowed(javaVM))
+      {
+      if (javaVM->internalVMFunctions->isDebugOnRestoreEnabled(javaVM))
+         {
+         return false;
+         }
+      }
+#endif
+
    return
 #if defined(J9VM_JIT_FULL_SPEED_DEBUG)
       (javaVM->requiredDebugAttributes & J9VM_DEBUG_ATTRIBUTE_CAN_ACCESS_LOCALS) ||
@@ -3092,7 +3109,6 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
    J9JITConfig * jitConfig = (J9JITConfig*)base;
    J9JavaVM * javaVM = jitConfig->javaVM;
    J9HookInterface * * vmHooks = javaVM->internalVMFunctions->getVMHookInterface(javaVM);
-   J9VMThread * vmThread = javaVM->internalVMFunctions->currentVMThread(javaVM);
 
    TR_J9VMBase * vm = TR_J9VMBase::get(jitConfig, 0);
    TR::CompilationInfo * compInfo = TR::CompilationInfo::get(jitConfig);
@@ -3128,7 +3144,7 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
       }
 #if defined(J9VM_OPT_CRIU_SUPPORT)
    else if (fsdStatus == FSDInitStatus::FSDInit_NotInitialized
-            && javaVM->internalVMFunctions->isDebugOnRestoreEnabled(vmThread))
+            && javaVM->internalVMFunctions->isDebugOnRestoreEnabled(javaVM))
       {
       self()->setOption(TR_FullSpeedDebug);
       self()->setOption(TR_DisableDirectToJNI);
@@ -3322,7 +3338,7 @@ bool J9::Options::feLatePostProcess(void * base, TR::OptionSet * optionSet)
             }
          }
 #if defined(J9VM_OPT_CRIU_SUPPORT)
-      else if (!javaVM->internalVMFunctions->isDebugOnRestoreEnabled(vmThread))
+      else if (!javaVM->internalVMFunctions->isDebugOnRestoreEnabled(javaVM))
 #else
       else
 #endif /* defined(J9VM_OPT_CRIU_SUPPORT) */
@@ -3819,8 +3835,8 @@ J9::Options::resetFSD(J9JavaVM *vm, J9VMThread *vmThread, bool &doAOT)
    TR_ASSERT_FATAL (fsdStatusJIT == fsdStatusAOT, "fsdStatusJIT=%d != fsdStatusAOT=%d!\n", fsdStatusJIT, fsdStatusAOT);
 
    if (fsdStatusJIT == TR::Options::FSDInitStatus::FSDInit_NotInitialized
-       && !vm->internalVMFunctions->isCheckpointAllowed(vmThread)
-       && vm->internalVMFunctions->isDebugOnRestoreEnabled(vmThread))
+       && !vm->internalVMFunctions->isCheckpointAllowed(vm)
+       && vm->internalVMFunctions->isDebugOnRestoreEnabled(vm))
       {
       getCmdLineOptions()->setFSDOptionsForAll(false);
       getAOTCmdLineOptions()->setFSDOptionsForAll(false);

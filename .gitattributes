@@ -21,6 +21,10 @@
 # Binary files
 *.blob binary
 *.gif binary
+*.jar binary
 *.jpg binary
 *.png binary
 *.zip binary
+test/functional/cmdLineTests/jvmtitests/jars/test.fil binary
+test/functional/cmdLineTests/URLClassLoaderTests/SignedSealed/benKeyStore binary
+test/functional/cmdLineTests/URLClassLoaderTests/SignedSealed/benKeyStore.forMVS binary
